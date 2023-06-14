@@ -1,0 +1,64 @@
+#!/bin/sh -e
+#
+# Build the pScheduler Database
+#
+set -x
+exit 1
+
+# Start the server
+#su - postgres -c "/usr/lib/postgresql/12/bin/pg_ctl start -D /var/lib/pgsql/12/data -w -t 60"
+#echo "Server started"
+
+ROLE="pscheduler"
+
+# Generate the password file
+tr -cd '[:alnum:]' < /dev/urandom | fold -w64 | head -n 1 > '/etc/pscheduler/database/database-password'
+echo "Password generated"
+
+# Generate the DSN file
+awk -v "ROLE=${ROLE}" '{ printf "host=127.0.0.1 dbname=pscheduler user=%s password=%s\n", ROLE, $1 }' \
+    "/etc/pscheduler/database/database-password" \
+    > "/etc/pscheduler/database/database-dsn"
+echo "DSN generated"
+
+# Generate a PostgreSQL password file
+# Format is hostname:port:database:username:password
+awk -v "ROLE=${ROLE}" '{ printf "*:*:pscheduler:%s:%s\n", ROLE, $1 }' \
+    "/etc/pscheduler/database/database-password" \
+    > "/etc/pscheduler/database/pgpassfile"
+chmod 400 "/etc/pscheduler/database/pgpassfile"
+echo "Pgpassword generated"
+
+
+# Hot patch the database loader so it doesn't barf when not
+# interactive.
+# TODO: Remove this after pS 4.0.0.3.  Probably harmless if left here.
+sed -i -e 's/^\(\$INTERACTIVE.*\)$/\1 || true/g' \
+    /usr/lib/pscheduler/internals/db-update 
+echo "Loader patched"
+
+# Build the database
+# pscheduler internal db-update
+#pscheduler internal db-update
+#echo "Database loaded"
+
+# Set the password in the pScheduler database to match what's on the
+# disk.
+# ( \
+#     printf "ALTER ROLE pscheduler WITH PASSWORD '" \
+#     && tr -d "\n" < "/etc/pscheduler/database/database-password" \
+#     && printf "';\n" \
+# ) | postgresql-load
+# echo "Password set"
+
+pschedulerpass=$( cat "/etc/pscheduler/database/database-password" )
+#su - postgres -c "psql -d pscheduler --variable=pass=$mypass -c \"CREATE ROLE pscheduler WITH PASSWORD :'pass'\""
+su - postgres -c "psql -c <<< echo \"CREATE ROLE pscheduler WITH PASSWORD '$pschedulerpass';\""
+echo "Password set"
+su - postgres -c "psql -c <<< echo \"GRANT ALL ON pscheduler to pscheduler;\""
+echo "Permissions set"
+# Shut down
+#su - postgres -c "/usr/lib/postgresql/12/bin/pg_ctl stop  -w -t 60"
+#echo "Server stopped"
+
+exit 0
